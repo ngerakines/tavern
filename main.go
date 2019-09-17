@@ -108,7 +108,7 @@ func Server(cliCtx *cli.Context) error {
 		i.Data(200, "text/plain", []byte("OK"))
 	})
 
-	wfh := server.WebfingerHandler{
+	wkh := server.WebKnownHandler{
 		Domain: domain,
 		Logger: logger,
 		DB:     db,
@@ -120,7 +120,7 @@ func Server(cliCtx *cli.Context) error {
 		DB:     db,
 	}
 
-	r.GET("/.well-known/webfinger", wfh.Webfinger)
+	r.GET("/.well-known/webfinger", wkh.WebFinger)
 
 	usersRouter := r.Group("/users")
 	{
@@ -129,6 +129,9 @@ func Server(cliCtx *cli.Context) error {
 		usersRouter.GET("/:user", ah.ActorHandler)
 		usersRouter.GET("/:user/followers", ah.FollowersHandler)
 		usersRouter.GET("/:user/following", ah.FollowingHandler)
+
+		usersRouter.GET("/:user/outbox", ah.OutboxHandler)
+		usersRouter.POST("/:user/outbox", ah.OutboxSubmitHandler)
 	}
 
 	var g run.Group
@@ -195,7 +198,13 @@ func automigrate(cliCtx *cli.Context, db *gorm.DB, logger *zap.Logger) error {
 		if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS citext;`).Error; err != nil {
 			return err
 		}
-		if err := db.AutoMigrate(&model.Actor{}, &model.Activity{}, &model.Graph{}).Error; err != nil {
+		if err := db.AutoMigrate(&model.Actor{},
+			&model.Activity{},
+			&model.Graph{},
+			&model.ActorActivity{},
+			&model.Object{},
+		).
+			Error; err != nil {
 			return err
 		}
 

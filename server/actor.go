@@ -1,11 +1,9 @@
 package server
 
 import (
-	"fmt"
 	"github.com/gin-gonic/gin"
 	"github.com/jinzhu/gorm"
 	"github.com/ngerakines/tavern/model"
-	"github.com/piprate/json-gold/ld"
 	"go.uber.org/zap"
 	"net/http"
 	"strconv"
@@ -17,58 +15,23 @@ type ActorHandler struct {
 	DB     *gorm.DB
 }
 
-type collectionResponse struct {
-	Context      string   `json:"@context"`
-	ResponseType string   `json:"type"`
-	ID           string   `json:"id"`
-	Total        int64    `json:"totalItems"`
-	Items        []string `json:"items,omitempty"`
-}
-
-func createFollowersResponse(user, domain string, followers []string) (map[string]interface{}, error) {
-	/*
-		{
-		  "@context": "https://www.w3.org/ns/activitystreams",
-		  "type": "Collection",
-		  "id": "https://tavern.ngrok.io/users/nick/followers",
-		  "totalItems": 0
-		}
-	*/
-	proc := ld.NewJsonLdProcessor()
-	options := ld.NewJsonLdOptions("https://www.w3.org/ns/activitystreams")
-	options.ProcessingMode = ld.JsonLd_1_1
-
-	actor := model.NewActorID(user, domain)
-
-	doc := map[string]interface{}{
-		"@context":   jsonldContextFollowers(),
-		"type":       "Collection",
-		"id":         actor.Followers(),
-		"totalItems": len(followers),
-		"items":      followers,
-	}
-
-	context := map[string]interface{}{
-		"@context": jsonldContextFollowers(),
-	}
-
-	return proc.Compact(doc, context, options)
-}
-
-func createFollowingResponse(user, domain string, following []string) collectionResponse {
-	return collectionResponse{
-		Context:      "https://www.w3.org/ns/activitystreams",
-		ResponseType: "Collection",
-		ID:           fmt.Sprintf("https://%s/users/%s/following", domain, user),
-		Total:        int64(len(following)),
-		Items:        following,
-	}
-}
+var (
+	followersPerPage = 20
+	followingPerPage = 20
+	activityPerPage  = 20
+)
 
 func (h ActorHandler) ActorHandler(c *gin.Context) {
 	user := c.Param("user")
 
 	actor := model.NewActorID(user, h.Domain)
+
+	publicKey, err := model.ActorPublicKey(h.DB, user, h.Domain)
+	if err != nil {
+		h.Logger.Error("unable to get public key", zap.Error(err), zap.String("user", user), zap.String("domain", h.Domain))
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
 
 	actorContext := []interface{}{
 		"https://www.w3.org/ns/activitystreams",
@@ -107,6 +70,11 @@ func (h ActorHandler) ActorHandler(c *gin.Context) {
 		"outbox":            actor.Outbox(),
 		"followers":         actor.Followers(),
 		"following":         actor.Following(),
+		"publicKey": map[string]interface{}{
+			"id":           "https://mastodon.social/users/ngerakines#main-key",
+			"owner":        actor.MainKey(),
+			"publicKeyPem": publicKey,
+		},
 	}
 
 	documentContext := map[string]interface{}{
@@ -181,37 +149,13 @@ func (h ActorHandler) FollowersPageHandler(c *gin.Context) {
 		page = 1
 	}
 
-	followers, err := model.FollowersPageLookup(h.DB, string(model.NewActorID(user, h.Domain)), page, 20)
+	followers, err := model.FollowersPageLookup(h.DB, string(model.NewActorID(user, h.Domain)), page, followersPerPage)
 	if err != nil {
 		h.Logger.Error("unable to get followers", zap.Error(err), zap.String("user", user), zap.String("domain", h.Domain))
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
-	/*
-		{
-		  "@context": "https://www.w3.org/ns/activitystreams",
-		  "id": "https://mastodon.social/users/ngerakines/following?page=1",
-		  "type": "OrderedCollectionPage",
-		  "totalItems": 20,
-		  "next": "https://mastodon.social/users/ngerakines/following?page=2",
-		  "partOf": "https://mastodon.social/users/ngerakines/following",
-		  "orderedItems": [
-		    "https://mastodon.social/users/Sommer",
-		    "https://mastodon.social/users/ironfroggy",
-		    "https://mastodon.social/users/fribbledom",
-		    "https://mastodon.social/users/ControversyRecords",
-		    "https://mastodon.social/users/envgen",
-		    "https://mastodon.social/users/shesgabrielle",
-		    "https://mastodon.social/users/ottaross",
-		    "https://bsd.network/users/phessler",
-		    "https://toot.cat/users/forktogether",
-		    "https://chaos.social/users/dmitri",
-		    "https://cybre.space/users/qwazix",
-		    "https://mastodon.social/users/dheadshot"
-		  ]
-		}
-	*/
 	rootContext := []interface{}{
 		"https://www.w3.org/ns/activitystreams",
 		map[string]interface{}{
@@ -220,8 +164,7 @@ func (h ActorHandler) FollowersPageHandler(c *gin.Context) {
 			"value":         "schema:value",
 			"orderedItems": map[string]interface{}{
 				"@container": "@list",
-				"@id":   "as:orderedItems",
-				//"@type": "@id",
+				"@id":        "as:orderedItems",
 			},
 		},
 	}
@@ -230,17 +173,16 @@ func (h ActorHandler) FollowersPageHandler(c *gin.Context) {
 		"id":         actor.FollowersPage(page),
 		"type":       "OrderedCollectionPage",
 		"totalItems": len(followers),
-		// next
-		"partOf": actor.Followers(),
+		"partOf":     actor.Followers(),
 	}
 	if len(followers) > 0 {
 		document["orderedItems"] = followers
 	}
-	if len(followers) == 20 {
+	if len(followers) == followersPerPage {
 		document["next"] = actor.FollowersPage(page + 1)
 	}
 	if page > 1 {
-		document["last"] = actor.FollowersPage(page - 1)
+		document["prev"] = actor.FollowersPage(page - 1)
 	}
 
 	documentContext := map[string]interface{}{
@@ -258,29 +200,109 @@ func (h ActorHandler) FollowersPageHandler(c *gin.Context) {
 }
 
 func (h ActorHandler) FollowingHandler(c *gin.Context) {
-	if !matchContentType(c) {
-		c.AbortWithStatus(http.StatusExpectationFailed)
+	if c.Query("page") == "" {
+		h.FollowingIndexHandler(c)
 		return
 	}
+	h.FollowingPageHandler(c)
+}
 
+func (h ActorHandler) FollowingIndexHandler(c *gin.Context) {
 	user := c.Param("user")
+	actor := model.NewActorID(user, h.Domain)
 
-	ok, err := model.ActorLookup(h.DB, user, h.Domain)
+	count, err := model.FollowingCount(h.DB, string(model.NewActorID(user, h.Domain)))
 	if err != nil {
-		h.Logger.Error("failed looking up user", zap.Error(err), zap.String("user", user), zap.String("domain", h.Domain))
+		h.Logger.Error("unable to get following", zap.Error(err), zap.String("user", user), zap.String("domain", h.Domain))
 		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
-	if !ok {
-		h.Logger.Error("user not found", zap.String("user", user), zap.String("domain", h.Domain))
-		c.AbortWithStatus(http.StatusNotFound)
+
+	rootContext := []interface{}{
+		"https://www.w3.org/ns/activitystreams",
+	}
+	document := map[string]interface{}{
+		"@context":   rootContext,
+		"type":       "OrderedCollection",
+		"id":         actor.Following(),
+		"totalItems": count,
+	}
+	if count > 0 {
+		document["first"] = actor.FollowingPage(1)
+	}
+
+	documentContext := map[string]interface{}{
+		"@context": rootContext,
+	}
+
+	result, err := compactJSONLD(document, documentContext)
+	if err != nil {
+		h.Logger.Error("unable to create response", zap.Error(err), zap.String("user", user), zap.String("domain", h.Domain))
+		c.AbortWithStatus(http.StatusInternalServerError)
 		return
 	}
 
-	following, err := model.FollowingLookup(h.DB, string(model.NewActorID(user, h.Domain)))
+	WriteJSONLD(c, result)
+}
 
-	c.Writer.Header().Set("Content-Type", "application/json")
-	c.Writer.Header().Set("Cache-Control", "no-cache")
-	c.Writer.Header().Set("Pragma", "no-cache")
-	c.JSON(200, createFollowingResponse(user, h.Domain, following))
+func (h ActorHandler) FollowingPageHandler(c *gin.Context) {
+	user := c.Param("user")
+	actor := model.NewActorID(user, h.Domain)
+	page, err := strconv.Atoi(c.Query("page"))
+	if err != nil {
+		h.Logger.Warn("invalid following page", zap.Error(err), zap.String("user", user), zap.String("domain", h.Domain), zap.String("page", c.Query("page")))
+		page = 1
+	}
+	if page < 1 {
+		page = 1
+	}
+
+	followers, err := model.FollowingPageLookup(h.DB, string(model.NewActorID(user, h.Domain)), page, followingPerPage)
+	if err != nil {
+		h.Logger.Error("unable to get followers", zap.Error(err), zap.String("user", user), zap.String("domain", h.Domain))
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	rootContext := []interface{}{
+		"https://www.w3.org/ns/activitystreams",
+		map[string]interface{}{
+			"schema":        "http://schema.org#",
+			"PropertyValue": "schema:PropertyValue",
+			"value":         "schema:value",
+			"orderedItems": map[string]interface{}{
+				"@container": "@list",
+				"@id":        "as:orderedItems",
+			},
+		},
+	}
+	document := map[string]interface{}{
+		"@context":   rootContext,
+		"id":         actor.FollowingPage(page),
+		"type":       "OrderedCollectionPage",
+		"totalItems": len(followers),
+		"partOf":     actor.Following(),
+	}
+	if len(followers) > 0 {
+		document["orderedItems"] = followers
+	}
+	if len(followers) == followingPerPage {
+		document["next"] = actor.FollowingPage(page + 1)
+	}
+	if page > 1 {
+		document["prev"] = actor.FollowingPage(page - 1)
+	}
+
+	documentContext := map[string]interface{}{
+		"@context": rootContext,
+	}
+
+	result, err := compactJSONLD(document, documentContext)
+	if err != nil {
+		h.Logger.Error("unable to create response", zap.Error(err), zap.String("user", user), zap.String("domain", h.Domain))
+		c.AbortWithStatus(http.StatusInternalServerError)
+		return
+	}
+
+	WriteJSONLD(c, result)
 }

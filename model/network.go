@@ -68,13 +68,28 @@ func FollowersPageLookup(db *gorm.DB, to string, page, limit int) ([]string, err
 	return ids, nil
 }
 
-func FollowingLookup(db *gorm.DB, from string) ([]string, error) {
+func FollowingCount(db *gorm.DB, from string) (int, error) {
+	var count int
+	err := db.
+		Model(&Graph{}).
+		Where("follower = ?", from).
+		Count(&count).
+		Error
+	if err != nil {
+		return -1, err
+	}
+	return count, nil
+}
+
+func FollowingPageLookup(db *gorm.DB, from string, page, limit int) ([]string, error) {
 	var ids []string
 	err := db.
 		Model(&Graph{}).
 		Order("created_at asc").
+		Offset((page-1)*limit).
+		Limit(limit).
 		Where("follower = ?", from).
-		Pluck("actor", &ids).
+		Pluck("follower", &ids).
 		Error
 	if err != nil {
 		return nil, err

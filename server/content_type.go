@@ -36,25 +36,3 @@ func matchContentType(c *gin.Context) bool {
 
 	return false
 }
-
-func jsonldContextFollowers() interface{} {
-	return []interface{}{
-		"https://www.w3.org/ns/activitystreams",
-		map[string]interface{}{
-			"schema": "http://schema.org#",
-			"items":  "as:items",
-		},
-	}
-}
-
-func jsonldContextFollowering() interface{} {
-	return []interface{}{
-		"https://www.w3.org/ns/activitystreams",
-		map[string]interface{}{
-			"items": map[string]interface{}{
-				"@id":   "as:items",
-				"@type": "@id",
-			},
-		},
-	}
-}

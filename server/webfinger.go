@@ -13,7 +13,7 @@ import (
 
 type UserLookup func(*gorm.DB, string, string) (bool, error)
 
-type WebfingerHandler struct {
+type WebKnownHandler struct {
 	Domain string
 	Logger *zap.Logger
 	DB     *gorm.DB
@@ -45,7 +45,7 @@ func createWebFingerResponse(user, domain string) webFingerResponse {
 	}
 }
 
-func (h WebfingerHandler) Webfinger(c *gin.Context) {
+func (h WebKnownHandler) WebFinger(c *gin.Context) {
 	user, domain, err := fingerUserDomain(c.Query("resource"), h.Domain)
 	if err != nil {
 		h.Logger.Error("failed parsing resource", zap.Error(err), zap.String("resource", c.Query("resource")))
