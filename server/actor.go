@@ -215,9 +215,13 @@ func (h ActorHandler) FollowersPageHandler(c *gin.Context) {
 	rootContext := []interface{}{
 		"https://www.w3.org/ns/activitystreams",
 		map[string]interface{}{
-			"items": map[string]interface{}{
-				"@id":   "as:items",
-				"@type": "@id",
+			"schema":        "http://schema.org#",
+			"PropertyValue": "schema:PropertyValue",
+			"value":         "schema:value",
+			"orderedItems": map[string]interface{}{
+				"@container": "@list",
+				"@id":   "as:orderedItems",
+				//"@type": "@id",
 			},
 		},
 	}
