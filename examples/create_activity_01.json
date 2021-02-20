@@ -1,0 +1,12 @@
+{
+  "@context": "https://www.w3.org/ns/activitystreams",
+  "type": "Note",
+  "content": "Hello world!",
+  "published": "2019-09-11T10:30:01Z",
+  "to": [
+    "https://www.w3.org/ns/activitystreams#Public"
+  ],
+  "cc": [
+    "https://tavern.ngrok.io/users/nick/followers"
+  ]
+}
